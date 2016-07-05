@@ -9,7 +9,8 @@ namespace Crystalgorithm\DurmandScriptorium\utils;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Event\CompleteEvent;
-use GuzzleHttp\Event\ErrorEvent;
+use GuzzleHttp\Message\Response;
+use GuzzleHttp\Pool;
 
 class BatchRequestManager
 {
@@ -20,9 +21,9 @@ class BatchRequestManager
     protected $client;
 
     /**
-     * @var array Array of Response
+     * @var array Array of file handles
      */
-    protected $aggregatedResponse;
+    protected $fileHandles;
 
     /**
      * @var int nb of maximum parallel requests
@@ -33,46 +34,45 @@ class BatchRequestManager
     {
 	$this->client = $client;
 	$this->parallel = $parallel;
-	$this->aggregatedResponse = array();
+	$this->fileHandles = array();
     }
 
     public function executeRequests(array $requests)
     {
 	set_time_limit(Settings::TIMEOUT_LIMIT_IN_SECONDS);
-	ini_set('memory_limit', Settings::MEMORY_LIMIT_IN_BYTES);
-	$this->resetAggregatedResponse();
+	ini_set('memory_limit', Settings::MEMORY_LIMIT);
+	$this->resetFileHandles();
 
-	$requestChunks = array_chunk($requests, $this->parallel);
-
-	foreach ($requestChunks as $requestChunk)
-	{
-	    $this->sendRequestChunk($requestChunk);
-	}
-
-	return $this->aggregatedResponse;
-    }
-
-    protected function sendRequestChunk(array $requests)
-    {
-	$this->client->sendAll($requests, [
+	$pool = new Pool($this->client, $requests, [
 	    'complete' => function (CompleteEvent $event)
 	    {
-		$this->aggregatedResponse[] = $event->getResponse();
+		$this->saveResponseToFile($event->getResponse());
 	    },
-	    'error' => function (ErrorEvent $event)
-	    {
-		// TODO log errors
-//		echo 'Request failed: ' . $event->getRequest()->getUrl() . "\n";
-//		echo $event->getException();
-	    },
-	    'parallel' => $this->parallel
+	    'pool_size' => Settings::NB_OF_PARALLEL_REQUESTS
 	]);
+
+	$pool->wait();
+
+	return $this->fileHandles;
     }
 
-    protected function resetAggregatedResponse()
+    protected function saveResponseToFile(Response &$response)
     {
-	unset($this->aggregatedResponse);
-	$this->aggregatedResponse = array();
+	$fileName = __DIR__ . '\\json\\' . sizeof($this->fileHandles) . '.json';
+	$reponseSavedToFile = file_put_contents($fileName, $response->getBody());
+
+	if ($reponseSavedToFile != false)
+	{
+	    $this->fileHandles[] = $fileName;
+	}
+
+	unset($response);
+    }
+
+    protected function resetFileHandles()
+    {
+	unset($this->fileHandles);
+	$this->fileHandles = array();
     }
 
 }

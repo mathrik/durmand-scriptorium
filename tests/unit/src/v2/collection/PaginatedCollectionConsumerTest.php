@@ -5,13 +5,14 @@
  * @copyright 2014 Etienne Lamoureux
  * @license http://opensource.org/licenses/BSD-3-Clause BSD-3-Clause
  */
-namespace Crystalgorithm\DurmandScriptorium\v2\converter;
+namespace Crystalgorithm\DurmandScriptorium\v2\collection;
 
 use Crystalgorithm\DurmandScriptorium\exceptions\BadRequestException;
 use Crystalgorithm\DurmandScriptorium\utils\BatchRequestManager;
 use Crystalgorithm\DurmandScriptorium\utils\Settings;
-use Crystalgorithm\DurmandScriptorium\v2\collection\CollectionRequestFactory;
-use Crystalgorithm\DurmandScriptorium\v2\collection\V2CollectionConsumer;
+use Crystalgorithm\DurmandScriptorium\v2\collection\PaginatedCollectionConsumer;
+use Crystalgorithm\DurmandScriptorium\v2\collection\PaginatedCollectionRequestFactory;
+use Crystalgorithm\PhpJsonIterator\JsonIteratorFactory;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Message\Request;
@@ -19,13 +20,15 @@ use GuzzleHttp\Message\Response;
 use Mockery;
 use PHPUnit_Framework_TestCase;
 
-class V2CollectionConsumerTest extends PHPUnit_Framework_TestCase
+class PaginatedCollectionConsumerTest extends PHPUnit_Framework_TestCase
 {
 
     const VALID_ID = 100;
     const INVALID_ID = -1;
     const NB_PAGE = 2;
-    const ONE_PAGE = 1;
+    const ONE_PAGE = 0;
+    const FIRST_PAGE = 0;
+    const LAST_PAGE = 1;
     const VALID_PAGE = 1;
     const INVALID_PAGE = 1;
     const INVALID_PAGE_SIZE = 250;
@@ -43,7 +46,7 @@ class V2CollectionConsumerTest extends PHPUnit_Framework_TestCase
     protected $client;
 
     /**
-     * @var CollectionRequestFactory mock
+     * @var PaginatedCollectionRequestFactory mock
      */
     protected $requestFactory;
 
@@ -67,16 +70,23 @@ class V2CollectionConsumerTest extends PHPUnit_Framework_TestCase
      */
     protected $exception;
 
+    /**
+     *
+     * @var JsonIteratorFactory
+     */
+    protected $jsonIteratorFactory;
+
     protected function setUp()
     {
 	$this->client = Mockery::mock('GuzzleHttp\Client');
-	$this->requestFactory = Mockery::mock('Crystalgorithm\DurmandScriptorium\v2\collection\CollectionRequestFactory');
+	$this->requestFactory = Mockery::mock('Crystalgorithm\DurmandScriptorium\v2\collection\PaginatedCollectionRequestFactory');
 	$this->batchRequestManager = Mockery::mock('Crystalgorithm\DurmandScriptorium\utils\BatchRequestManager');
 	$this->request = Mockery::mock('GuzzleHttp\Message\Request');
 	$this->response = Mockery::mock('GuzzleHttp\Message\Response');
 	$this->exception = Mockery::mock('GuzzleHttp\Exception\ClientException');
+	$this->jsonIteratorFactory = Mockery::mock('Crystalgorithm\PhpJsonIterator\JsonIteratorFactory');
 
-	$this->consumer = new V2CollectionConsumer($this->client, $this->requestFactory, $this->batchRequestManager);
+	$this->consumer = new PaginatedCollectionConsumer($this->client, $this->requestFactory, $this->batchRequestManager, $this->jsonIteratorFactory);
     }
 
     protected function tearDown()
@@ -123,6 +133,18 @@ class V2CollectionConsumerTest extends PHPUnit_Framework_TestCase
 	$this->consumer->getAll();
     }
 
+    public function testWhenRequestPageRangeGet()
+    {
+	$this->requestFactory->shouldReceive('pageRequest')->andReturn($this->request);
+	$this->client->shouldReceive('send')->with($this->request)->andReturn($this->response);
+	$this->response->shouldReceive('getHeader')->with(Settings::TOTAL_PAGE_HEADER)->once()->andReturn(self::NB_PAGE);
+
+	$actual = $this->consumer->getPageRange();
+
+	$expected = ['first' => self::FIRST_PAGE, 'last' => self::LAST_PAGE];
+	$this->assertEquals($expected, $actual);
+    }
+
     public function testWhenRequestAllDetailsThenGetAllDetails()
     {
 	$responses = [$this->response, $this->response];
@@ -132,17 +154,7 @@ class V2CollectionConsumerTest extends PHPUnit_Framework_TestCase
 	$this->response->shouldReceive('getHeader')->with(Settings::TOTAL_PAGE_HEADER)->once()->andReturn(self::NB_PAGE);
 	$this->response->shouldReceive('json')->atLeast(1)->andReturn([]);
 	$this->batchRequestManager->shouldReceive('executeRequests')->once()->andReturn($responses);
-
-	$this->consumer->getAll(true);
-    }
-
-    public function testGivenASinglePageOfDataWhenRequestAllDetailsThenCallOnce()
-    {
-	$this->requestFactory->shouldReceive('pageRequest')->once()->andReturn($this->request);
-	$this->client->shouldReceive('send')->with($this->request)->once()->andReturn($this->response);
-	$this->response->shouldReceive('getHeader')->with(Settings::TOTAL_PAGE_HEADER)->once()->andReturn(self::ONE_PAGE);
-	$this->response->shouldReceive('json')->once()->andReturn([]);
-	$this->batchRequestManager->shouldReceive('executeRequests')->never();
+	$this->jsonIteratorFactory->shouldReceive('buildJsonFilesIterator');
 
 	$this->consumer->getAll(true);
     }

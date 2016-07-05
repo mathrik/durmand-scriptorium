@@ -10,6 +10,7 @@ namespace Crystalgorithm\DurmandScriptorium;
 use Crystalgorithm\DurmandScriptorium\exceptions\BadRequestException;
 use Crystalgorithm\DurmandScriptorium\utils\BatchRequestManager;
 use Crystalgorithm\DurmandScriptorium\v2\RequestFactory;
+use Crystalgorithm\PhpJsonIterator\JsonIteratorFactory;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 
@@ -31,64 +32,72 @@ abstract class Consumer
      */
     protected $batchRequestManager;
 
-    public function __construct(Client $client, RequestFactory $requestFactory, BatchRequestManager $batchRequestManager)
+    /**
+     * @var JsonIteratorFactory
+     */
+    protected $jsonIteratorFactory;
+
+    /**
+     * @var String
+     */
+    protected $idString;
+
+    public function __construct(Client $client, RequestFactory $requestFactory, BatchRequestManager $batchRequestManager, JsonIteratorFactory $jsonIteratorFactory)
     {
 	$this->client = $client;
 	$this->requestFactory = $requestFactory;
 	$this->batchRequestManager = $batchRequestManager;
+	$this->jsonIteratorFactory = $jsonIteratorFactory;
+	$this->idString = null;
     }
 
     protected function getDataFromApi($request)
     {
 	$response = $this->getResponse($request);
-	$phpArray = $this->convertResponseToArray($response);
+	$iterator = $this->convertResponseToArray($response);
 
-	return $phpArray;
+	return $iterator;
     }
 
     protected function getResponse($request)
     {
 	if (is_array($request))
 	{
-	    if (sizeof($request) <= 0)
-	    {
-		return array();
-	    }
-
-	    $response = $this->batchRequestManager->executeRequests($request);
+	    return $this->getResponses($request);
 	}
-	else
+
+	try
 	{
-	    try
-	    {
-		$response = $this->client->send($request);
-	    }
-	    catch (ClientException $ex)
-	    {
-		throw new BadRequestException($ex->getResponse()->json()['text']);
-	    }
+	    $response = $this->client->send($request);
+	}
+	catch (ClientException $ex)
+	{
+	    throw new BadRequestException($ex->getResponse()->json()['text']);
 	}
 
 	return $response;
+    }
+
+    protected function getResponses(array $requests)
+    {
+	return $this->batchRequestManager->executeRequests($requests);
     }
 
     protected function convertResponseToArray($response)
     {
 	if (is_array($response))
 	{
-	    $phpArray = array();
-
-	    foreach ($response as $value)
-	    {
-		$phpArray = array_merge($phpArray, $value->json());
-	    }
-	}
-	else
-	{
-	    $phpArray = $response->json();
+	    return $this->convertResponsesToArray($response);
 	}
 
-	return $phpArray;
+	$iterator = $response->json();
+
+	return $iterator;
+    }
+
+    protected function convertResponsesToArray(array $responses)
+    {
+	return $this->jsonIteratorFactory->buildJsonFilesIterator($responses, ['firstTopLevelString' => $this->idString]);
     }
 
 }
